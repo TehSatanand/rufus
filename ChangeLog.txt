@@ -1,3 +1,71 @@
+o Version 2.9 (2016.05.17)
+    Add ARM support for UEFI:NTFS
+    Fix UEFI:NTFS support for HP and Gigabyte firmwares (with thanks to Rod Smith and linnaea)
+    Fix unwanted listing of some internal removable drives
+    Fix the resurgence of a possible Syslinux installation crash
+    Fix missing default cluster size default on exFAT for >32GB drives
+    Fix the non-removal of the commandline hogger in some corner cases
+    Use "modern" file selection dialog on Vista or later (if you can spot the difference, good for you...)
+
+o Version 2.8 (2016.03.22)
+    Enable listing of non-USB card readers (EXPERIMENTAL)
+    Major speed improvement for checksum computation
+    Fix UI flicker during progress actualization
+    Fix computation of FAT size for Large FAT32 (with thanks to Ady)
+    Syslinux improvements
+    Update GRUB to 2.02~beta3
+
+o Version 2.7 (2016.02.14)
+    Add Thai translation, courtesy of Sippapas Wangsri
+    Add Drag and Drop support, courtesy of SeymourApps
+    Add a retry for most write operations
+    Update UEFI:NTFS, ms-sys and Grub4DOS to latest
+    Dual sign Rufus with both SHA-1 and SHA-256
+    Fix 2nd line of SHA-256 being hidden on some platforms
+    Fix shutdown prevention issues
+    Additional fixes & translation updates
+
+o Version 2.6 (2015.12.22)
+    Add Serbian (Latin) translation, courtesy of Ivan Strugar
+    Add a cheat mode to zero a device (Alt-Z)
+    Fix dual BIOS/UEFI mode not being disabled once enabled (Alt-E)
+    Fix a crash when Syslinux downloaded files are modified by a firewall
+    Fix FAT32 not being disabled for Windows ISOs in BIOS/CSM mode
+    Additional translation updates
+
+o Version 2.5 (2015.10.26)
+    Add SHA-256 checksum verification
+    Add a cheat mode to disable exclusive USB drive locking (Alt-,)
+    Add digital signature check on update downloads
+    Add Azerbaijani translation, courtesy of Elvin Məlikov
+    Add Persian translation, courtesy of Seyed Zia Azimi (ziaa)
+    Fix an issue where the update settings dialog may not display properly
+    Report Windows build number in the log (Windows 8 or later)
+    Many localization improvements and fixes, especially for right-to-left languages
+    Additional translation updates
+
+o Version 2.4 (2015.09.27)
+    Allow some settings and cheat modes to be persisted between sessions
+    Fix multiple issues with flash drive detection
+    Fix listing of drives that contain no media
+    Fix cheat mode to save the current USB to *uncompressed* VHD (Alt-V)
+    Fix an UI scaling issue with high DPI displays for non English languages
+    Update most of the translations
+    Additional cosmetic improvements
+
+o Version 2.3 (2015.08.28)
+    Detect ISOHybrid images and ask users how they should be written
+    Add MD5/SHA1 checksum verification ('#' button on the status bar)
+    Add Zip decompression support for DD Images
+    Add a cheat mode to save the current USB to *uncompressed* VHD (Alt-V)
+    Add a cheat mode for ISO timestamp preservation (Alt-T)
+    Add a cheat mode for USB enumeration debugging (Alt-.)
+    Disable MS-DOS creation for Windows 10 or later (FreeDOS is still available)
+    Fix Windows To Go creation issues, and enable access to internal disks
+    Fix UEFI support for Fedora ISOs
+    Fix some USB enumeration issues
+    Other improvements and fixes, including translation updates
+
 o Version 2.2 (2015.05.31)
     Modernize the language selection button, courtesy of David Warner
     Add keyboard accessibility, courtesy of David Warner

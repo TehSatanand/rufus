@@ -1,7 +1,7 @@
 /*
  * Rufus: The Reliable USB Formatting Utility
  * Elementary Unicode compliant find/replace parser
- * Copyright © 2012-2014 Pete Batard <pete@akeo.ie>
+ * Copyright © 2012-2016 Pete Batard <pete@akeo.ie>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -32,6 +32,7 @@
 #include <fcntl.h>
 
 #include "rufus.h"
+#include "missing.h"
 #include "msapi_utf8.h"
 #include "localization.h"
 
@@ -41,8 +42,6 @@ static const char* conversion_error = "Could not convert '%s' to UTF-16";
 
 const struct {char c; int flag;} attr_parse[] = {
 	{ 'r', LOC_RIGHT_TO_LEFT },
-	{ 'a', LOC_ARABIC_NUMERALS },	// NOT IMPLEMENTED
-	{ 'j', LOC_JAPANESE_NUMERALS },	// NOT IMPLEMENTED
 };
 
 /*
@@ -137,6 +136,10 @@ static loc_cmd* get_loc_cmd(char c, char* line) {
 					lcmd->unum_size++;
 			}
 			lcmd->unum = (uint32_t*)malloc(lcmd->unum_size * sizeof(uint32_t));
+			if (lcmd->unum == NULL) {
+				luprint("could not allocate memory");
+				goto err;
+			}
 			token = strtok(&line[i], ".,");
 			for (l=0; (l<lcmd->unum_size) && (token != NULL); l++) {
 				lcmd->unum[l] = (int32_t)strtol(token, &endptr, 0);
@@ -239,13 +242,12 @@ BOOL get_supported_locales(const char* filename)
 	FILE* fd = NULL;
 	BOOL r = FALSE;
 	char line[1024];
-	char* LT[] = LOST_TRANSLATORS;	//just to get the arraysize...
 	size_t i, j, k;
 	loc_cmd *lcmd = NULL, *last_lcmd = NULL;
 	long end_of_block;
 	int version_line_nr = 0;
 	uint32_t loc_base_minor = -1, loc_base_micro = -1;
-	
+
 	fd = open_loc_file(filename);
 	if (fd == NULL)
 		goto out;
@@ -344,18 +346,11 @@ BOOL get_supported_locales(const char* filename)
 					LOC_FRAMEWORK_VERSION, loc_base_minor);
 			} else {
 				if (lcmd->unum[2] < loc_base_micro) {
+					last_lcmd->ctrl_id |= LOC_NEEDS_UPDATE;
 					luprintf("the version of this translation is older than the base one and may result in some messages not being properly translated.\n"
 						"If you are the translator, please update your translation with the changes that intervened between v%d.%d.%d and v%d.%d.%d.\n"
-						"See https://github.com/pbatard/rufus/blob/master/res/localization/ChangeLog.txt", 
+						"See https://github.com/pbatard/rufus/blob/master/res/localization/ChangeLog.txt",
 						LOC_FRAMEWORK_VERSION, loc_base_minor, lcmd->unum[2], LOC_FRAMEWORK_VERSION, loc_base_minor, loc_base_micro);
-				} else if (lcmd->unum[2] >= loc_base_micro) {
-					// Don't bug users about a locale that may already have been upgraded
-					for (i=0; i<ARRAYSIZE(LT); i++) {
-						if (safe_strcmp(last_lcmd->txt[0], lost_translators[i]) == 0) {
-							uprintf("NOTE: This translation appears up to date - Removing it from LOST_TRANSLATORS");
-							lost_translators[i][0] = 0;
-						}
-					}
 				}
 				version_line_nr = loc_line_nr;
 			}
@@ -374,7 +369,7 @@ BOOL get_supported_locales(const char* filename)
 	}
 	r = !list_empty(&locale_list);
 	if (r == FALSE)
-		uprintf("localization: '%s' contains no valid locale sections\n", filename); 
+		uprintf("localization: '%s' contains no valid locale sections\n", filename);
 
 out:
 	if (fd != NULL)
@@ -576,7 +571,7 @@ out:
 
 /*
  * Parse a line of UTF-16 text and return the data if it matches the 'token'
- * The parsed line is of the form: [ ]token[ ]=[ ]["]data["][ ] and is 
+ * The parsed line is of the form: [ ]token[ ]=[ ]["]data["][ ] and is
  * modified by the parser
  */
 static wchar_t* get_token_data_line(const wchar_t* wtoken, wchar_t* wline)
@@ -603,7 +598,7 @@ static wchar_t* get_token_data_line(const wchar_t* wtoken, wchar_t* wline)
 	i += wcsspn(&wline[i], wspace);
 
 	// Check for an equal sign
-	if (wline[i] != L'=') 
+	if (wline[i] != L'=')
 		return NULL;
 	i++;
 
@@ -1006,7 +1001,7 @@ char* insert_section_data(const char* filename, const char* section, const char*
 		break;
 	}
 	fseek(fd_in, 0, SEEK_SET);
-//	duprintf("'%s' was detected as %s\n", filename, 
+//	duprintf("'%s' was detected as %s\n", filename,
 //		(mode==0)?"ANSI/UTF8 (no BOM)":((mode==1)?"UTF8 (with BOM)":"UTF16 (with BOM"));
 
 	wtmpname = (wchar_t*)calloc(wcslen(wfilename)+2, sizeof(wchar_t));
@@ -1145,8 +1140,8 @@ char* replace_in_token_data(const char* filename, const char* token, const char*
 		break;
 	}
 	fseek(fd_in, 0, SEEK_SET);
-	duprintf("'%s' was detected as %s\n", filename, 
-		(mode==0)?"ANSI/UTF8 (no BOM)":((mode==1)?"UTF8 (with BOM)":"UTF16 (with BOM"));
+//	duprintf("'%s' was detected as %s\n", filename,
+//		(mode==0)?"ANSI/UTF8 (no BOM)":((mode==1)?"UTF8 (with BOM)":"UTF16 (with BOM"));
 
 
 	wtmpname = (wchar_t*)calloc(wcslen(wfilename)+2, sizeof(wchar_t));
@@ -1247,6 +1242,8 @@ char* replace_char(const char* src, const char c, const char* rep)
 			count++;
 	}
 	res = (char*)malloc(str_len + count*rep_len + 1);
+	if (res == NULL)
+		return NULL;
 	for (i=0,j=0; i<str_len; i++) {
 		if (src[i] == c) {
 			for(k=0; k<rep_len; k++)

@@ -2,8 +2,8 @@
  * Rufus: The Reliable USB Formatting Utility
  * DOS boot file extraction, from the FAT12 floppy image in diskcopy.dll
  * (MS WinME DOS) or from the embedded FreeDOS resource files
- * Copyright © 2011-2015 Pete Batard <pete@akeo.ie>
- * 
+ * Copyright © 2011-2016 Pete Batard <pete@akeo.ie>
+ *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
@@ -31,8 +31,10 @@
 #include <string.h>
 
 #include "rufus.h"
-#include "dos.h"
+#include "missing.h"
 #include "resource.h"
+
+#include "dos.h"
 
 static BYTE* DiskImage = NULL;
 static DWORD DiskImageSize;
@@ -69,10 +71,6 @@ typedef struct _TIME_FIELDS {
 #define ARGUMENT_PRESENT(ArgumentPointer) \
 	((CHAR*)((ULONG_PTR)(ArgumentPointer)) != (CHAR*)NULL)
 
-static const int YearLengths[2] =
-{
-	DAYSPERNORMALYEAR, DAYSPERLEAPYEAR
-};
 static const UCHAR MonthLengths[2][MONSPERYEAR] =
 {
 	{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 },
@@ -257,8 +255,8 @@ static BOOL ExtractFAT(int entry, const char* path)
 		return FALSE;
 	}
 
-	if ((!WriteFile(hFile, &DiskImage[filestart], (DWORD)filesize, &Size, 0)) || (filesize != Size)) {
-		uprintf("Couldn't write file '%s': %s.\n", filename, WindowsErrorString());
+	if (!WriteFileWithRetry(hFile, &DiskImage[filestart], (DWORD)filesize, &Size, WRITE_RETRIES)) {
+		uprintf("Could not write file '%s': %s.\n", filename, WindowsErrorString());
 		safe_closehandle(hFile);
 		return FALSE;
 	}
@@ -299,6 +297,9 @@ static BOOL ExtractMSDOS(const char* path)
 		"KEYB    COM", "KEYBOARDSYS", "KEYBRD2 SYS", "KEYBRD3 SYS", "KEYBRD4 SYS",
 		"DISPLAY SYS", "EGA     CPI", "EGA2    CPI", "EGA3    CPI" };
 
+	if (path == NULL)
+		return FALSE;
+
 	// Reduce the visible mess by placing all the locale files into a subdir
 	safe_strcpy(locale_path, sizeof(locale_path), path);
 	safe_strcat(locale_path, sizeof(locale_path), "LOCALE\\");
@@ -321,7 +322,7 @@ static BOOL ExtractMSDOS(const char* path)
 		goto out;
 
 	// Sanity check
-	if (DiskImageSize < 700*1024) {
+	if (DiskImageSize < 700*KB) {
 		uprintf("MS-DOS disk image is too small (%d bytes)\n", dllname, DiskImageSize);
 		goto out;
 	}
@@ -386,13 +387,13 @@ BOOL ExtractFreeDOS(const char* path)
 
 		hFile = CreateFileA(filename, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL,
 			CREATE_ALWAYS, (i<2)?(FILE_ATTRIBUTE_HIDDEN|FILE_ATTRIBUTE_SYSTEM):FILE_ATTRIBUTE_NORMAL, NULL);
-		if (hFile == INVALID_HANDLE_VALUE) {
+		if ((hFile == NULL) || (hFile == INVALID_HANDLE_VALUE)) {
 			uprintf("Unable to create file '%s': %s.\n", filename, WindowsErrorString());
 			return FALSE;
 		}
 
-		if ((!WriteFile(hFile, res_data, res_size, &Size, 0)) || (res_size != Size)) {
-			uprintf("Couldn't write file '%s': %s.\n", filename, WindowsErrorString());
+		if (!WriteFileWithRetry(hFile, res_data, res_size, &Size, WRITE_RETRIES)) {
+			uprintf("Could not write file '%s': %s.\n", filename, WindowsErrorString());
 			safe_closehandle(hFile);
 			return FALSE;
 		}
@@ -413,9 +414,9 @@ BOOL ExtractFreeDOS(const char* path)
 BOOL ExtractDOS(const char* path)
 {
 	switch(ComboBox_GetItemData(hBootType, ComboBox_GetCurSel(hBootType))) {
-	case DT_WINME:
+	case BT_MSDOS:
 		return ExtractMSDOS(path);
-	case DT_FREEDOS:
+	case BT_FREEDOS:
 		return ExtractFreeDOS(path);
 	}
 	return FALSE;

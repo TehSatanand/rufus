@@ -5,13 +5,15 @@
 #define IDD_DIALOG                      101
 #define IDD_ABOUTBOX                    102
 #define IDD_NOTIFICATION                103
-#define IDD_LICENSE                     104
-#define IDD_LOG                         105
-#define IDD_UPDATE_POLICY               106
-#define IDD_NEW_VERSION                 107
-#define IDI_ICON                        110
-#define IDI_UP                          111
-#define IDI_DOWN                        112
+#define IDD_SELECTION                   104
+#define IDD_LICENSE                     105
+#define IDD_LOG                         106
+#define IDD_UPDATE_POLICY               107
+#define IDD_NEW_VERSION                 108
+#define IDD_CHECKSUM                    109
+#define IDI_ICON                        120
+#define IDI_UP                          121
+#define IDI_DOWN                        122
 #define IDD_DIALOG_XP                   151
 #define IDD_ABOUTBOX_XP                 152
 #define IDD_NOTIFICATION_XP             153
@@ -94,6 +96,8 @@
 #define IDC_DISK_ID                     1022
 #define IDC_EXTRA_PARTITION             1023
 #define IDC_ENABLE_FIXED_DISKS          1024
+#define IDC_STATUS_TOOLBAR              1025
+#define IDC_HASH                        1026
 #define IDC_ABOUT_LICENSE               1030
 #define IDC_ABOUT_ICON                  1031
 #define IDC_ABOUT_UPDATES               1032
@@ -122,6 +126,14 @@
 #define IDC_YOUR_VERSION                1068
 #define IDC_LATEST_VERSION              1069
 #define IDC_DOWNLOAD_URL                1070
+#define IDC_MD5                         1071
+#define IDC_SHA1                        1072
+#define IDC_SHA256                      1073
+#define IDC_SELECTION_ICON              1074
+#define IDC_SELECTION_TEXT              1075
+#define IDC_SELECTION_LINE              1076
+#define IDC_SELECTION_CHOICE1           1077
+#define IDC_SELECTION_CHOICE2           1078
 #define IDS_DEVICE_TXT                  2000
 #define IDS_PARTITION_TYPE_TXT          2001
 #define IDS_FILESYSTEM_TXT              2002
@@ -405,7 +417,27 @@
 #define MSG_267                         3267
 #define MSG_268                         3268
 #define MSG_269                         3269
-#define MSG_MAX                         3270
+#define MSG_270                         3270
+#define MSG_271                         3271
+#define MSG_272                         3272
+#define MSG_273                         3273
+#define MSG_274                         3274
+#define MSG_275                         3275
+#define MSG_276                         3276
+#define MSG_277                         3277
+#define MSG_278                         3278
+#define MSG_279                         3279
+#define MSG_280                         3280
+#define MSG_281                         3281
+#define MSG_282                         3282
+#define MSG_283                         3283
+#define MSG_284                         3284
+#define MSG_285                         3285
+#define MSG_286                         3286
+#define MSG_287                         3287
+#define MSG_288                         3288
+#define MSG_289                         3289
+#define MSG_MAX                         3290
 
 // Next default values for new objects
 // 
@@ -414,7 +446,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        505
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1071
+#define _APS_NEXT_CONTROL_VALUE         1079
 #define _APS_NEXT_SYMED_VALUE           4000
 #endif
 #endif

@@ -1,7 +1,7 @@
 /*
  * Rufus: The Reliable USB Formatting Utility
  * Virtual Disk Handling functions
- * Copyright © 2013-2015 Pete Batard <pete@akeo.ie>
+ * Copyright © 2013-2016 Pete Batard <pete@akeo.ie>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,21 +24,13 @@
 #include <time.h>
 
 #include "rufus.h"
+#include "missing.h"
 #include "resource.h"
 #include "msapi_utf8.h"
+
 #include "drive.h"
 #include "registry.h"
 #include "bled/bled.h"
-
-#if defined(_MSC_VER)
-#define bswap_uint64 _byteswap_uint64
-#define bswap_uint32 _byteswap_ulong
-#define bswap_uint16 _byteswap_ushort
-#else
-#define bswap_uint64 __builtin_bswap64
-#define bswap_uint32 __builtin_bswap32
-#define bswap_uint16 __builtin_bswap16
-#endif
 
 #define VHD_FOOTER_COOKIE					{ 'c', 'o', 'n', 'e', 'c', 't', 'i', 'x' }
 
@@ -111,7 +103,7 @@ static char sevenzip_path[MAX_PATH];
 static const char conectix_str[] = VHD_FOOTER_COOKIE;
 static uint32_t wim_nb_files, wim_proc_files;
 static BOOL count_files;
-static DWORD LastRefresh;
+static uint64_t LastRefresh;
 
 static BOOL Get7ZipPath(void)
 {
@@ -157,7 +149,7 @@ BOOL AppendVHDFooter(const char* vhd_path)
 	footer->features = bswap_uint32(VHD_FOOTER_FEATURES_RESERVED);
 	footer->file_format_version = bswap_uint32(VHD_FOOTER_FILE_FORMAT_V1_0);
 	footer->data_offset = bswap_uint64(VHD_FOOTER_DATA_OFFSET_FIXED_DISK);
-	footer->timestamp = bswap_uint32(_time32(NULL) - SECONDS_SINCE_JAN_1ST_2000);
+	footer->timestamp = bswap_uint32((uint32_t)(_time64(NULL) - SECONDS_SINCE_JAN_1ST_2000));
 	memcpy(footer->creator_app, creator_app, sizeof(creator_app));
 	footer->creator_version = bswap_uint32((rufus_version[0]<<16)|rufus_version[1]);
 	memcpy(footer->creator_host_os, creator_os, sizeof(creator_os));
@@ -178,7 +170,7 @@ BOOL AppendVHDFooter(const char* vhd_path)
 		heads = 16;
 		cylinderTimesHeads = (uint32_t)(totalSectors / sectorsPerTrack);
 	} else {
-		sectorsPerTrack = 17; 
+		sectorsPerTrack = 17;
 		cylinderTimesHeads = (uint32_t)(totalSectors / sectorsPerTrack);
 
 		heads = (cylinderTimesHeads + 1023) / 1024;
@@ -207,12 +199,12 @@ BOOL AppendVHDFooter(const char* vhd_path)
 		checksum += ((uint8_t*)footer)[i];
 	footer->checksum = bswap_uint32(~checksum);
 
-	if (!WriteFile(handle, footer, sizeof(vhd_footer), &size, NULL) || (size != sizeof(vhd_footer))) {
+	if (!WriteFileWithRetry(handle, footer, sizeof(vhd_footer), &size, WRITE_RETRIES)) {
 		uprintf("Could not write VHD footer: %s", WindowsErrorString());
 		goto out;
 	}
 	r = TRUE;
-	
+
 out:
 	safe_free(footer);
 	safe_closehandle(handle);
@@ -225,11 +217,12 @@ typedef struct {
 } comp_assoc;
 
 static comp_assoc file_assoc[] = {
-	{ ".xz", BLED_COMPRESSION_XZ },
+	{ ".zip", BLED_COMPRESSION_ZIP },
+	{ ".Z", BLED_COMPRESSION_LZW },
 	{ ".gz", BLED_COMPRESSION_GZIP },
 	{ ".lzma", BLED_COMPRESSION_LZMA },
 	{ ".bz2", BLED_COMPRESSION_BZIP2 },
-	{ ".Z", BLED_COMPRESSION_LZW },
+	{ ".xz", BLED_COMPRESSION_XZ },
 };
 
 // For now we consider that an image that matches a known extension is bootable
@@ -242,7 +235,7 @@ BOOL IsCompressedBootableImage(const char* path)
 	BOOL r = FALSE;
 	int64_t dc;
 
-	iso_report.compression_type = BLED_COMPRESSION_NONE;
+	img_report.compression_type = BLED_COMPRESSION_NONE;
 	for (p = (char*)&path[strlen(path)-1]; (*p != '.') && (p != path); p--);
 
 	if (p == path)
@@ -250,7 +243,7 @@ BOOL IsCompressedBootableImage(const char* path)
 
 	for (i = 0; i<ARRAYSIZE(file_assoc); i++) {
 		if (strcmp(p, file_assoc[i].ext) == 0) {
-			iso_report.compression_type = file_assoc[i].type;
+			img_report.compression_type = file_assoc[i].type;
 			buf = malloc(MBR_SIZE);
 			if (buf == NULL)
 				return FALSE;
@@ -272,7 +265,7 @@ BOOL IsCompressedBootableImage(const char* path)
 }
 
 
-BOOL IsHDImage(const char* path)
+BOOL IsBootableImage(const char* path)
 {
 	HANDLE handle = INVALID_HANDLE_VALUE;
 	LARGE_INTEGER liImageSize;
@@ -281,39 +274,41 @@ BOOL IsHDImage(const char* path)
 	size_t i;
 	uint32_t checksum, old_checksum;
 	LARGE_INTEGER ptr;
+	BOOL is_bootable_img = FALSE;
 
+	uprintf("Disk image analysis:");
 	handle = CreateFileU(path, GENERIC_READ, FILE_SHARE_READ, NULL,
 		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (handle == INVALID_HANDLE_VALUE) {
-		uprintf("Could not open image '%s'", path);
+		uprintf("  Could not open image '%s'", path);
 		goto out;
 	}
 
-	iso_report.is_bootable_img = (BOOLEAN)IsCompressedBootableImage(path);
-	if (iso_report.compression_type == BLED_COMPRESSION_NONE)
-		iso_report.is_bootable_img = (BOOLEAN)AnalyzeMBR(handle, "Image");
+	is_bootable_img = (BOOLEAN)IsCompressedBootableImage(path);
+	if (img_report.compression_type == BLED_COMPRESSION_NONE)
+		is_bootable_img = (BOOLEAN)AnalyzeMBR(handle, "  Image");
 
 	if (!GetFileSizeEx(handle, &liImageSize)) {
-		uprintf("Could not get image size: %s", WindowsErrorString());
+		uprintf("  Could not get image size: %s", WindowsErrorString());
 		goto out;
 	}
-	iso_report.projected_size = (uint64_t)liImageSize.QuadPart;
+	img_report.projected_size = (uint64_t)liImageSize.QuadPart;
 
 	size = sizeof(vhd_footer);
-	if ((iso_report.compression_type == BLED_COMPRESSION_NONE) && (iso_report.projected_size >= (512 + size))) {
+	if ((img_report.compression_type == BLED_COMPRESSION_NONE) && (img_report.projected_size >= (512 + size))) {
 		footer = (vhd_footer*)malloc(size);
-		ptr.QuadPart = iso_report.projected_size - size;
+		ptr.QuadPart = img_report.projected_size - size;
 		if ( (footer == NULL) || (!SetFilePointerEx(handle, ptr, NULL, FILE_BEGIN)) ||
 			 (!ReadFile(handle, footer, size, &size, NULL)) || (size != sizeof(vhd_footer)) ) {
-			uprintf("Could not read VHD footer");
+			uprintf("  Could not read VHD footer");
 			goto out;
 		}
 		if (memcmp(footer->cookie, conectix_str, sizeof(footer->cookie)) == 0) {
-			iso_report.projected_size -= sizeof(vhd_footer);
+			img_report.projected_size -= sizeof(vhd_footer);
 			if ( (bswap_uint32(footer->file_format_version) != VHD_FOOTER_FILE_FORMAT_V1_0)
 			  || (bswap_uint32(footer->disk_type) != VHD_FOOTER_TYPE_FIXED_HARD_DISK)) {
-				uprintf("Unsupported type of VHD image");
-				iso_report.is_bootable_img = FALSE;
+				uprintf("  Unsupported type of VHD image");
+				is_bootable_img = FALSE;
 				goto out;
 			}
 			// Might as well validate the checksum while we're at it
@@ -323,17 +318,17 @@ BOOL IsHDImage(const char* path)
 				checksum += ((uint8_t*)footer)[i];
 			checksum = ~checksum;
 			if (checksum != old_checksum)
-				uprintf("Warning: VHD footer seems corrupted (checksum: %04X, expected: %04X)", old_checksum, checksum);
+				uprintf("  Warning: VHD footer seems corrupted (checksum: %04X, expected: %04X)", old_checksum, checksum);
 			// Need to remove the footer from our payload
-			uprintf("Image is a Fixed Hard Disk VHD file");
-			iso_report.is_vhd = TRUE;
+			uprintf("  Image is a Fixed Hard Disk VHD file");
+			img_report.is_vhd = TRUE;
 		}
 	}
 
 out:
 	safe_free(footer);
 	safe_closehandle(handle);
-	return iso_report.is_bootable_img;
+	return is_bootable_img;
 }
 
 #define WIM_HAS_API_EXTRACT 1
@@ -436,38 +431,54 @@ out:
 // Extract a file from a WIM image using 7-Zip
 static BOOL WimExtractFile_7z(const char* image, int index, const char* src, const char* dst)
 {
+	int n;
 	size_t i;
-	STARTUPINFOA si = {0};
-	PROCESS_INFORMATION pi = {0};
 	char cmdline[MAX_PATH];
 	char tmpdst[MAX_PATH];
+	char index_prefix[] = "#\\";
 
 	uprintf("Opening: %s:[%d] (7-Zip)", image, index);
-	safe_strcpy(tmpdst, sizeof(tmpdst), dst);
-	for (i=safe_strlen(tmpdst); i>0; i--) {
-		if (tmpdst[i] == '\\')
+
+	if ((image == NULL) || (src == NULL) || (dst == NULL))
+		return FALSE;
+
+	// If you shove more than 9 images in a WIM, don't come complaining
+	// that this breaks!
+	index_prefix[0] = '0' + index;
+
+	uprintf("Extracting: %s (From %s)", dst, src);
+
+	// 7z has a quirk where the image index MUST be specified if a
+	// WIM has multiple indexes, but it MUST be removed if there is
+	// only one image. Because of this (and because 7z will not
+	// return an error code if it can't extract the file), we need
+	// to issue 2 passes. See github issue #680.
+	for (n = 0; n < 2; n++) {
+		safe_strcpy(tmpdst, sizeof(tmpdst), dst);
+		for (i = strlen(tmpdst) - 1; i > 0; i--) {
+			if (tmpdst[i] == '\\')
+				break;
+		}
+		tmpdst[i] = 0;
+
+		safe_sprintf(cmdline, sizeof(cmdline), "\"%s\" -y e \"%s\" %s%s", sevenzip_path,
+			image, (n == 0) ? index_prefix : "", src);
+		if (RunCommand(cmdline, tmpdst, FALSE) != 0) {
+			uprintf("  Could not launch 7z.exe: %s", WindowsErrorString());
+			return FALSE;
+		}
+
+		safe_strcat(tmpdst, sizeof(tmpdst), "\\bootmgfw.efi");
+		if (_access(tmpdst, 0) == 0)
+			// File was extracted => move on
 			break;
 	}
-	tmpdst[i] = 0;
 
-	// TODO: use RunCommand
-	si.cb = sizeof(si);
-	safe_sprintf(cmdline, sizeof(cmdline), "7z -y e \"%s\" %d\\%s", image, index, src);
-	uprintf("Extracting: %s (From %s)", dst, src);
-	if (!CreateProcessU(sevenzip_path, cmdline, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, tmpdst, &si, &pi)) {
-		uprintf("  Could not launch 7z.exe: %s", WindowsErrorString());
-		return FALSE;
-	}
-	WaitForSingleObject(pi.hProcess, INFINITE);
-	UpdateProgress(OP_FINALIZE, -1.0f);
-	CloseHandle(pi.hProcess);
-	CloseHandle(pi.hThread);
-
-	safe_strcat(tmpdst, sizeof(tmpdst), "\\bootmgfw.efi");
-	if (_access(tmpdst, 0) == -1) {
+	if (n >= 2) {
 		uprintf("  7z.exe did not extract %s", tmpdst);
 		return FALSE;
 	}
+
 	// coverity[toctou]
 	if (rename(tmpdst, dst) != 0) {
 		uprintf("  Could not rename %s to %s", tmpdst, dst);
@@ -516,7 +527,7 @@ enum WIMMessage {
 	WIM_MSG_WARNING,	// Sent when a warning message is available.
 	WIM_MSG_CHK_PROCESS,
 	WIM_MSG_SUCCESS = 0x00000000,
-	WIM_MSG_ABORT_IMAGE = 0xFFFFFFFF
+	WIM_MSG_ABORT_IMAGE = -1
 };
 
 #define INVALID_CALLBACK_VALUE 0xFFFFFFFF
@@ -562,12 +573,12 @@ DWORD WINAPI WimProgressCallback(DWORD dwMsgId, WPARAM wParam, LPARAM lParam, PV
 			wim_nb_files++;
 		} else {
 			wim_proc_files++;
-			if (GetTickCount() > LastRefresh + 100) {
+			if (_GetTickCount64() > LastRefresh + 100) {
 				// At the end of an actual apply, the WIM API re-lists a bunch of directories it
 				// already processed, so we end up with more entries than counted - ignore those.
 				if (wim_proc_files > wim_nb_files)
 					wim_proc_files = wim_nb_files;
-				LastRefresh = GetTickCount();
+				LastRefresh = _GetTickCount64();
 				// x^3 progress, so as not to give a better idea right from the onset
 				// as to the dismal speed with which the WIM API can actually apply files...
 				apply_percent = 4.636942595f * ((float)wim_proc_files) / ((float)wim_nb_files);

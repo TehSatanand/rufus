@@ -1,4 +1,4 @@
-AC_INIT([rufus], [2.3], [https://github.com/pbatard/rufus/issues], [rufus], [http://rufus.akeo.ie])
+AC_INIT([rufus], [2.10], [https://github.com/pbatard/rufus/issues], [rufus], [http://rufus.akeo.ie])
 AM_INIT_AUTOMAKE([-Wno-portability foreign no-dist no-dependencies])
 AC_CONFIG_SRCDIR([src/rufus.c])
 AC_CONFIG_MACRO_DIR([m4])
@@ -35,7 +35,7 @@ else
   LDFLAGS="-s"
 fi
 
-# Alpha/Beta
+# Alpha/Beta/Test
 AC_ARG_ENABLE([alpha],[AS_HELP_STRING([--enable-alpha], [build an ALPHA release (default=no)])], [alpha_enabled=$enableval], [alpha_enabled='no'])
 if test "x$alpha_enabled" != "xno" ; then
   CFLAGS+=" -DALPHA"
@@ -45,6 +45,12 @@ AC_ARG_ENABLE([beta],[AS_HELP_STRING([--enable-beta], [build a BETA release (def
 if test "x$beta_enabled" != "xno" ; then
   CFLAGS+=" -DBETA"
   SUFFIX=_BETA
+fi
+AC_ARG_ENABLE([test],[AS_HELP_STRING([--enable-test=#], [build a TEST release (default=no)])], [test_enabled=$enableval], [test_enabled='no'])
+if test "x$test_enabled" != "xno" ; then
+  if test "x$test_enabled" == "xyes" ; then $enableval="" ; fi
+  CFLAGS+=" -DTEST=$enableval"
+  SUFFIX=_TEST$enableval
 fi
 
 AC_MSG_RESULT([enabling Large File Support (ISO support)])
@@ -74,4 +80,5 @@ AC_CONFIG_FILES([res/localization/Makefile])
 AC_CONFIG_FILES([src/ms-sys/Makefile])
 AC_CONFIG_FILES([src/syslinux/libfat/Makefile])
 AC_CONFIG_FILES([src/syslinux/libinstaller/Makefile])
+AC_CONFIG_FILES([src/syslinux/win/Makefile])
 AC_OUTPUT

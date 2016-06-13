@@ -28,6 +28,8 @@
 #include <shlwapi.h>
 #include <setupapi.h>
 #include <direct.h>
+#include <share.h>
+#include <fcntl.h>
 #include <io.h>
 
 #pragma once
@@ -64,7 +66,7 @@ extern "C" {
 #define isdigitU(c) isdigit((unsigned char)(c))
 #define isspaceU(c) isspace((unsigned char)(c))
 #define isxdigitU(c) isxdigit((unsigned char)(c))
-// NB: other issomething() calls are not implemented as they may require multibyte UTF-8 sequences to be converted 
+// NB: other issomething() calls are not implemented as they may require multibyte UTF-8 sequences to be converted
 
 #define sfree(p) do {if (p != NULL) {free((void*)(p)); p = NULL;}} while(0)
 #define wconvert(p)     wchar_t* w ## p = utf8_to_wchar(p)
@@ -203,6 +205,32 @@ static __inline int MessageBoxU(HWND hWnd, LPCSTR lpText, LPCSTR lpCaption, UINT
 	err = GetLastError();
 	wfree(lpText);
 	wfree(lpCaption);
+	SetLastError(err);
+	return ret;
+}
+
+static __inline int MessageBoxExU(HWND hWnd, LPCSTR lpText, LPCSTR lpCaption, UINT uType, WORD wLanguageId)
+{
+	int ret;
+	DWORD err = ERROR_INVALID_DATA;
+	wconvert(lpText);
+	wconvert(lpCaption);
+	ret = MessageBoxExW(hWnd, wlpText, wlpCaption, uType, wLanguageId);
+	err = GetLastError();
+	wfree(lpText);
+	wfree(lpCaption);
+	SetLastError(err);
+	return ret;
+}
+
+static __inline int DrawTextU(HDC hDC, LPCSTR lpText, int nCount, LPRECT lpRect, UINT uFormat)
+{
+	int ret;
+	DWORD err = ERROR_INVALID_DATA;
+	wconvert(lpText);
+	ret = DrawTextW(hDC, wlpText, nCount, lpRect, uFormat);
+	err = GetLastError();
+	wfree(lpText);
 	SetLastError(err);
 	return ret;
 }
@@ -407,6 +435,34 @@ static __inline DWORD GetCurrentDirectoryU(DWORD nBufferLength, char* lpBuffer)
 	return ret;
 }
 
+static __inline UINT GetSystemDirectoryU(char* lpBuffer, UINT uSize)
+{
+	UINT ret = 0, err = ERROR_INVALID_DATA;
+	walloc(lpBuffer, uSize);
+	ret = GetSystemDirectoryW(wlpBuffer, uSize);
+	err = GetLastError();
+	if ((ret != 0) && ((ret = wchar_to_utf8_no_alloc(wlpBuffer, lpBuffer, uSize)) == 0)) {
+		err = GetLastError();
+	}
+	wfree(lpBuffer);
+	SetLastError(err);
+	return ret;
+}
+
+static __inline UINT GetSystemWindowsDirectoryU(char* lpBuffer, UINT uSize)
+{
+	UINT ret = 0, err = ERROR_INVALID_DATA;
+	walloc(lpBuffer, uSize);
+	ret = GetSystemWindowsDirectoryW(wlpBuffer, uSize);
+	err = GetLastError();
+	if ((ret != 0) && ((ret = wchar_to_utf8_no_alloc(wlpBuffer, lpBuffer, uSize)) == 0)) {
+		err = GetLastError();
+	}
+	wfree(lpBuffer);
+	SetLastError(err);
+	return ret;
+}
+
 static __inline DWORD GetTempPathU(DWORD nBufferLength, char* lpBuffer)
 {
 	DWORD ret = 0, err = ERROR_INVALID_DATA;
@@ -505,7 +561,7 @@ static __inline int SHDeleteDirectoryExU(HWND hwnd, const char* pszPath, FILEOP_
 	// String needs to be double NULL terminated, so we just use the length of the UTF-8 string
 	// which is always expected to be larger than our UTF-16 one, and add 2 chars for good measure.
 	size_t wpszPath_len = strlen(pszPath) + 2;
-	wchar_t* wpszPath = (wchar_t*)calloc(wpszPath_len, sizeof(wchar_t));
+	walloc(pszPath, wpszPath_len);
 	SHFILEOPSTRUCTW shfo = { hwnd, FO_DELETE, wpszPath, NULL, fFlags, FALSE, NULL, NULL };
 	utf8_to_wchar_no_alloc(pszPath, wpszPath, (int)wpszPath_len);
 	// FOF_SILENT | FOF_NOERRORUI | FOF_NOCONFIRMATION,
@@ -726,6 +782,7 @@ static __inline int _chdirU(const char *dirname)
 	return ret;
 }
 
+#if defined(_WIN32_WINNT) && (_WIN32_WINNT <= 0x501)
 static __inline FILE* fopenU(const char* filename, const char* mode)
 {
 	FILE* ret = NULL;
@@ -737,7 +794,7 @@ static __inline FILE* fopenU(const char* filename, const char* mode)
 	return ret;
 }
 
-static __inline int _openU(const char *filename, int oflag , int pmode)
+static __inline int _openU(const char *filename, int oflag, int pmode)
 {
 	int ret = -1;
 	wconvert(filename);
@@ -755,6 +812,47 @@ static __inline char* getenvU(const char* varname)
 	wfree(varname);
 	return ret;
 }
+#else
+static __inline FILE* fopenU(const char* filename, const char* mode)
+{
+	FILE* ret = NULL;
+	wconvert(filename);
+	wconvert(mode);
+	_wfopen_s(&ret, wfilename, wmode);
+	wfree(filename);
+	wfree(mode);
+	return ret;
+}
+
+static __inline int _openU(const char *filename, int oflag , int pmode)
+{
+	int ret = -1;
+	int shflag = _SH_DENYNO;
+	wconvert(filename);
+	// Try to match the share flag to the oflag
+	if ((oflag & 0x03) == _O_RDONLY)
+		shflag = _SH_DENYWR;
+	else if ((oflag & 0x03) == _O_WRONLY)
+		shflag = _SH_DENYRD;
+	_wsopen_s(&ret, wfilename, oflag, shflag, pmode);
+	wfree(filename);
+	return ret;
+}
+
+// returned UTF-8 string must be freed
+static __inline char* getenvU(const char* varname)
+{
+	wconvert(varname);
+	char *ret;
+	wchar_t value[256];
+	size_t value_size;
+	// MinGW and WDK don't know wdupenv_s, so we use wgetenv_s
+	_wgetenv_s(&value_size, value, ARRAYSIZE(value), wvarname);
+	ret = wchar_to_utf8(value);
+	wfree(varname);
+	return ret;
+}
+#endif
 
 static __inline int _mkdirU(const char* dirname)
 {
@@ -762,6 +860,26 @@ static __inline int _mkdirU(const char* dirname)
 	int ret;
 	ret = _wmkdir(wdirname);
 	wfree(dirname);
+	return ret;
+}
+
+// The following expects PropertyBuffer to contain a single Unicode string
+static __inline BOOL SetupDiGetDeviceRegistryPropertyU(HDEVINFO DeviceInfoSet, PSP_DEVINFO_DATA DeviceInfoData,
+	DWORD Property, PDWORD PropertyRegDataType, PBYTE PropertyBuffer, DWORD PropertyBufferSize, PDWORD RequiredSize)
+{
+	DWORD ret = FALSE, err = ERROR_INVALID_DATA;
+	walloc(PropertyBuffer, PropertyBufferSize);
+
+	ret = SetupDiGetDeviceRegistryPropertyW(DeviceInfoSet, DeviceInfoData, Property,
+		PropertyRegDataType, (PBYTE)wPropertyBuffer, PropertyBufferSize, RequiredSize);
+	err = GetLastError();
+	if ((ret != 0) && (wchar_to_utf8_no_alloc(wPropertyBuffer,
+		(char*)(uintptr_t)PropertyBuffer, PropertyBufferSize) == 0)) {
+		err = GetLastError();
+		ret = FALSE;
+	}
+	wfree(PropertyBuffer);
+	SetLastError(err);
 	return ret;
 }
 

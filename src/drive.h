@@ -1,7 +1,7 @@
 /*
  * Rufus: The Reliable USB Formatting Utility
  * Drive access function calls
- * Copyright © 2011-2014 Pete Batard <pete@akeo.ie>
+ * Copyright © 2011-2016 Pete Batard <pete@akeo.ie>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,6 +19,7 @@
 
 #include <windows.h>
 #include <stdint.h>
+#include <winioctl.h>				// for DISK_GEOMETRY
 
 #pragma once
 
@@ -26,7 +27,7 @@
 #define MOUNTMGRCONTROLTYPE                 ((ULONG)'m')
 #define MOUNTMGR_DOS_DEVICE_NAME            "\\\\.\\MountPointManager"
 #define IOCTL_MOUNTMGR_QUERY_AUTO_MOUNT     \
-	CTL_CODE(MOUNTMGRCONTROLTYPE, 15, METHOD_BUFFERED, FILE_ANY_ACCESS) 
+	CTL_CODE(MOUNTMGRCONTROLTYPE, 15, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_MOUNTMGR_SET_AUTO_MOUNT       \
 	CTL_CODE(MOUNTMGRCONTROLTYPE, 16, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 
@@ -47,6 +48,33 @@ typedef struct {
 	// The one from MS uses ANYSIZE_ARRAY, which can lead to all kind of problems
 	DISK_EXTENT Extents[8];
 } VOLUME_DISK_EXTENTS_REDEF;
+
+static __inline BOOL UnlockDrive(HANDLE hDrive) {
+	DWORD size;
+	return DeviceIoControl(hDrive, FSCTL_UNLOCK_VOLUME, NULL, 0, NULL, 0, &size, NULL);
+}
+#define safe_unlockclose(h) do {if ((h != INVALID_HANDLE_VALUE) && (h != NULL)) {UnlockDrive(h); CloseHandle(h); h = INVALID_HANDLE_VALUE;}} while(0)
+
+/* Current drive info */
+typedef struct {
+	LONGLONG DiskSize;
+	DWORD DeviceNumber;
+	DWORD SectorsPerTrack;
+	DWORD SectorSize;
+	DWORD FirstSector;
+	MEDIA_TYPE MediaType;
+	int PartitionType;
+	int nPartitions;	// number of partitions we actually care about
+	int FSType;
+	char proposed_label[16];
+	BOOL has_protective_mbr;
+	BOOL has_mbr_uefi_marker;
+	struct {
+		ULONG Allowed;
+		ULONG Default;
+	} ClusterSize[FS_MAX];
+} RUFUS_DRIVE_INFO;
+extern RUFUS_DRIVE_INFO SelectedDrive;
 
 BOOL SetAutoMount(BOOL enable);
 BOOL GetAutoMount(BOOL* enabled);
@@ -71,6 +99,6 @@ BOOL AltUnmountVolume(const char* drive_name);
 char* AltMountVolume(const char* drive_name, uint8_t part_nr);
 BOOL RemountVolume(char* drive_name);
 BOOL CreatePartition(HANDLE hDrive, int partition_style, int file_system, BOOL mbr_uefi_marker, uint8_t extra_partitions);
-BOOL DeletePartitions(HANDLE hDrive);
+BOOL InitializeDisk(HANDLE hDrive);
 BOOL RefreshDriveLayout(HANDLE hDrive);
 const char* GetPartitionType(BYTE Type);

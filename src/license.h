@@ -19,7 +19,7 @@
 
 const char* about_blurb_format =
 "{\\rtf1\\ansi\n"
-"{\\b\\fs20%s}\\line\n"
+"\\b\\fs20%s\\b0\\line\n"
 "\\fs18%s\\line\n"
 "\\line\n"
 "%s\\line\n"
@@ -30,7 +30,7 @@ RUFUS_URL "\\line\n"
 "%s\\line\n"
 "https://github.com/pbatard/rufus/issues\\line\n"
 "\\line\n"
-"{\\b\\fs19 %s}}";
+"\\b\\fs19 %s\\b0}";
 
 const char* additional_copyrights =
 "{\\rtf1\\ansi\n"
@@ -101,6 +101,18 @@ const char* additional_copyrights =
 "http://kolibrios.org\\line\n"
 "GNU General Public License (GPL) v2 or later\\line\n"
 "\\line\n"
+"MD5 checksum by Ron Rivest, Colin Plumb et al.\\line\n"
+"Public Domain\\line\n"
+"\\line\n"
+"SHA-1 checksum from GnuPG:\\line\n"
+"https://www.gnupg.org\\line\n"
+"GNU General Public License (GPL) v3 or later\\line\n"
+"\\line\n"
+"SHA-256 checksum from 7-zip by Igor Pavlov and Crypto++ by Wei Dai:\\line\n"
+"http://7-zip.org\\line\n"
+"https://github.com/weidai11/cryptopp/\\line\n"
+"Public Domain\\line\n"
+"\\line\n"
 "About and License dialogs inspired by WinSCP by Martin Prikryl\\line\n"
 "http://winscp.net\\line\n"
 "GNU General Public License (GPL) v3 or later\\line\n"
@@ -113,12 +125,12 @@ const char* additional_copyrights =
 "All other references can be found in the source.\\line\n}";
 
 const char* update_policy =
-"{\\rtf1\\ansi{\\fonttbl{\\f0\\fnil\\fcharset0 Microsoft Sans Serif;}{\\f1\\fnil\\fcharset2 Symbol;}}\n"
+"{\\rtf1\\ansi{\\fonttbl{\\f0\\fnil\\fcharset0 Microsoft Sans Serif;}}\n"
 "\\fs16\\b %s\\b0\\line\n"
 "%s\\par\n"
-"\\pard{\\pntext\\f1\\'B7\\tab}{\\*\\pn\\pnlvlblt\\pnf2\\pnindent0{\\pntxtb\\'B7}}\\fi-150\\li220 %s\\par\n"
-"{\\pntext\\f1\\'B7\\tab}%s\\par\n"
-"{\\pntext\\f1\\'B7\\tab}%s\\line\\pard\n"
+"\\fs20•\\fs16  %s\\par\n"
+"\\fs20•\\fs16  %s\\par\n"
+"\\fs20•\\fs16  %s\\line\n"
 "\\line\n"
 "%s\\line\n\\line\n"
 "\\b %s\\b0\\line\n"

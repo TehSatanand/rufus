@@ -1,7 +1,7 @@
 /*
  * Rufus: The Reliable USB Formatting Utility
  * Networking functionality (web file download, check for update, etc.)
- * Copyright © 2012-2015 Pete Batard <pete@akeo.ie>
+ * Copyright © 2012-2016 Pete Batard <pete@akeo.ie>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -30,14 +30,16 @@
 #include <string.h>
 #include <inttypes.h>
 
-#include "msapi_utf8.h"
 #include "rufus.h"
-#include "settings.h"
+#include "missing.h"
 #include "resource.h"
+#include "msapi_utf8.h"
 #include "localization.h"
 
+#include "settings.h"
+
 /* Maximum download chunk size, in bytes */
-#define DOWNLOAD_BUFFER_SIZE    10240
+#define DOWNLOAD_BUFFER_SIZE    10*KB
 /* Default delay between update checks (1 day) */
 #define DEFAULT_UPDATE_INTERVAL (24*3600)
 
@@ -49,38 +51,9 @@ static DWORD error_code;
 static BOOL update_check_in_progress = FALSE;
 static BOOL force_update_check = FALSE;
 
-/* MinGW is missing some of those */
-#if !defined(ERROR_INTERNET_DISCONNECTED)
-#define ERROR_INTERNET_DISCONNECTED (INTERNET_ERROR_BASE + 163)
-#endif
-#if !defined(ERROR_INTERNET_SERVER_UNREACHABLE)
-#define ERROR_INTERNET_SERVER_UNREACHABLE (INTERNET_ERROR_BASE + 164)
-#endif
-#if !defined(ERROR_INTERNET_PROXY_SERVER_UNREACHABLE)
-#define ERROR_INTERNET_PROXY_SERVER_UNREACHABLE (INTERNET_ERROR_BASE + 165)
-#endif
-#if !defined(ERROR_INTERNET_BAD_AUTO_PROXY_SCRIPT)
-#define ERROR_INTERNET_BAD_AUTO_PROXY_SCRIPT (INTERNET_ERROR_BASE + 166)
-#endif
-#if !defined(ERROR_INTERNET_UNABLE_TO_DOWNLOAD_SCRIPT)
-#define ERROR_INTERNET_UNABLE_TO_DOWNLOAD_SCRIPT (INTERNET_ERROR_BASE + 167)
-#endif
-#if !defined(ERROR_INTERNET_FAILED_DUETOSECURITYCHECK)
-#define ERROR_INTERNET_FAILED_DUETOSECURITYCHECK (INTERNET_ERROR_BASE + 171)
-#endif
-#if !defined(ERROR_INTERNET_NOT_INITIALIZED)
-#define ERROR_INTERNET_NOT_INITIALIZED (INTERNET_ERROR_BASE + 172)
-#endif
-#if !defined(ERROR_INTERNET_NEED_MSN_SSPI_PKG)
-#define ERROR_INTERNET_NEED_MSN_SSPI_PKG (INTERNET_ERROR_BASE + 173)
-#endif
-#if !defined(ERROR_INTERNET_LOGIN_FAILURE_DISPLAY_ENTITY_BODY)
-#define ERROR_INTERNET_LOGIN_FAILURE_DISPLAY_ENTITY_BODY (INTERNET_ERROR_BASE + 174)
-#endif
-
 /*
  * FormatMessage does not handle internet errors
- * http://support.microsoft.com/kb/193625
+ * https://msdn.microsoft.com/en-us/library/windows/desktop/aa385465.aspx
  */
 const char* WinInetErrorString(void)
 {
@@ -230,12 +203,12 @@ const char* WinInetErrorString(void)
 		InternetGetLastResponseInfoA(&error_code, error_string, &size);
 		return error_string;
 	default:
-		safe_sprintf(error_string, sizeof(error_string), "Unknown internet error 0x%08X", error_code);
+		safe_sprintf(error_string, sizeof(error_string), "Unknown internet error 0x%08lX", error_code);
 		return error_string;
 	}
 }
 
-/* 
+/*
  * Download a file from an URL
  * Mostly taken from http://support.microsoft.com/kb/234913
  * If hProgressDialog is not NULL, this function will send INIT and EXIT messages
@@ -247,7 +220,7 @@ DWORD DownloadFile(const char* url, const char* file, HWND hProgressDialog)
 	HWND hProgressBar = NULL;
 	BOOL r = FALSE;
 	DWORD dwFlags, dwSize, dwDownloaded, dwTotalSize;
-	FILE* fd = NULL; 
+	FILE* fd = NULL;
 	LONG progress_style;
 	const char* accept_types[] = {"*/*\0", NULL};
 	unsigned char buf[DOWNLOAD_BUFFER_SIZE];
@@ -269,6 +242,9 @@ DWORD DownloadFile(const char* url, const char* file, HWND hProgressDialog)
 		}
 		SendMessage(hProgressDialog, UM_PROGRESS_INIT, 0, 0);
 	}
+
+	if (file == NULL)
+		goto out;
 
 	for (last_slash = safe_strlen(file); last_slash != 0; last_slash--) {
 		if ((file[last_slash] == '/') || (file[last_slash] == '\\')) {
@@ -297,7 +273,7 @@ DWORD DownloadFile(const char* url, const char* file, HWND hProgressDialog)
 		uprintf("Network is unavailable: %s\n", WinInetErrorString());
 		goto out;
 	}
-	_snprintf(agent, ARRAYSIZE(agent), APPLICATION_NAME "/%d.%d.%d (WinNT %d.%d%s)",
+	safe_sprintf(agent, ARRAYSIZE(agent), APPLICATION_NAME "/%d.%d.%d (Windows NT %d.%d%s)",
 		rufus_version[0], rufus_version[1], rufus_version[2],
 		nWindowsVersion>>4, nWindowsVersion&0x0F, is_x64()?"; WOW64":"");
 	hSession = InternetOpenA(agent, INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
@@ -313,8 +289,9 @@ DWORD DownloadFile(const char* url, const char* file, HWND hProgressDialog)
 	}
 
 	hRequest = HttpOpenRequestA(hConnection, "GET", UrlParts.lpszUrlPath, NULL, NULL, accept_types,
-		INTERNET_FLAG_HYPERLINK|INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTP|INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTPS|INTERNET_FLAG_NO_COOKIES|
-		INTERNET_FLAG_NO_UI|INTERNET_FLAG_NO_CACHE_WRITE, (DWORD_PTR)NULL);
+		INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTP|INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTPS|
+		INTERNET_FLAG_NO_COOKIES|INTERNET_FLAG_NO_UI|INTERNET_FLAG_NO_CACHE_WRITE|INTERNET_FLAG_HYPERLINK|
+		((UrlParts.nScheme==INTERNET_SCHEME_HTTPS)?INTERNET_FLAG_SECURE:0), (DWORD_PTR)NULL);
 	if (hRequest == NULL) {
 		uprintf("Could not open URL %s: %s\n", url, WinInetErrorString());
 		goto out;
@@ -378,12 +355,13 @@ out:
 		SendMessage(hProgressDialog, UM_PROGRESS_EXIT, (WPARAM)r, 0);
 	if (fd != NULL) fclose(fd);
 	if (!r) {
-		_unlink(file);
+		if (file != NULL)
+			_unlink(file);
 		if (PromptOnError) {
 			PrintInfo(0, MSG_242);
 			SetLastError(error_code);
-			MessageBoxU(hMainDialog, IS_ERROR(FormatStatus)?StrError(FormatStatus, FALSE):WinInetErrorString(),
-			lmprintf(MSG_044), MB_OK|MB_ICONERROR|MB_IS_RTL);
+			MessageBoxExU(hMainDialog, IS_ERROR(FormatStatus)?StrError(FormatStatus, FALSE):WinInetErrorString(),
+			lmprintf(MSG_044), MB_OK|MB_ICONERROR|MB_IS_RTL, selected_langid);
 		}
 	}
 	if (hRequest) InternetCloseHandle(hRequest);
@@ -425,9 +403,9 @@ static DWORD WINAPI CheckForUpdatesThread(LPVOID param)
 	BOOL releases_only, found_new_version = FALSE;
 	int status = 0;
 	const char* server_url = RUFUS_URL "/";
-	int i, j, k, verbose = 0, verpos[4];
+	int i, j, k, max_channel, verbose = 0, verpos[4];
 	static const char* archname[] = {"win_x86", "win_x64"};
-	static const char* channel[] = {"release", "beta"};		// release channel
+	static const char* channel[] = {"release", "beta", "test"};		// release channel
 	const char* accept_types[] = {"*/*\0", NULL};
 	DWORD dwFlags, dwSize, dwDownloaded, dwTotalSize, dwStatus;
 	char* buf = NULL;
@@ -470,8 +448,6 @@ static DWORD WINAPI CheckForUpdatesThread(LPVOID param)
 			vvuprintf("Local time: %" PRId64 "\n", local_time);
 			if (local_time < reg_time + update_interval) {
 				vuprintf("Next update check in %" PRId64 " seconds.\n", reg_time + update_interval - local_time);
-				// This is as good a place as any to ask for translation help
-				LostTranslatorCheck();
 				goto out;
 			}
 		}
@@ -489,7 +465,9 @@ static DWORD WINAPI CheckForUpdatesThread(LPVOID param)
 		goto out;
 	hostname[sizeof(hostname)-1] = 0;
 
-	safe_sprintf(agent, ARRAYSIZE(agent), APPLICATION_NAME "/%d.%d.%d", rufus_version[0], rufus_version[1], rufus_version[2]);
+	safe_sprintf(agent, ARRAYSIZE(agent), APPLICATION_NAME "/%d.%d.%d (Windows NT %d.%d%s)",
+		rufus_version[0], rufus_version[1], rufus_version[2],
+		nWindowsVersion >> 4, nWindowsVersion & 0x0F, is_x64() ? "; WOW64" : "");
 	hSession = InternetOpenA(agent, INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (hSession == NULL)
 		goto out;
@@ -500,14 +478,20 @@ static DWORD WINAPI CheckForUpdatesThread(LPVOID param)
 	status++;	// 2
 	releases_only = !ReadSettingBool(SETTING_INCLUDE_BETAS);
 
-	for (k=0; (k<(releases_only?1:(int)ARRAYSIZE(channel))) && (!found_new_version); k++) {
+	// Test releases get their own distribution channel (and also force beta checks)
+#if defined(TEST)
+	max_channel = (int)ARRAYSIZE(channel);
+#else
+	max_channel = releases_only ? 1 : (int)ARRAYSIZE(channel) - 1;
+#endif
+	for (k=0; (k<max_channel) && (!found_new_version); k++) {
 		uprintf("Checking %s channel...\n", channel[k]);
 		// At this stage we can query the server for various update version files.
 		// We first try to lookup for "<appname>_<os_arch>_<os_version_major>_<os_version_minor>.ver"
 		// and then remove each each of the <os_> components until we find our match. For instance, we may first
 		// look for rufus_win_x64_6.2.ver (Win8 x64) but only get a match for rufus_win_x64_6.ver (Vista x64 or later)
 		// This allows sunsetting OS versions (eg XP) or providing different downloads for different archs/groups.
-		safe_sprintf(urlpath, sizeof(urlpath), "%s%s%s_%s_%d.%d.ver", APPLICATION_NAME, (k==0)?"":"_",
+		safe_sprintf(urlpath, sizeof(urlpath), "%s%s%s_%s_%lu.%lu.ver", APPLICATION_NAME, (k==0)?"":"_",
 			(k==0)?"":channel[k], archname[is_x64()?1:0], os_version.dwMajorVersion, os_version.dwMinorVersion);
 		vuprintf("Base update check: %s\n", urlpath);
 		for (i=0, j=(int)safe_strlen(urlpath)-5; (j>0)&&(i<ARRAYSIZE(verpos)); j--) {
@@ -525,8 +509,9 @@ static DWORD WINAPI CheckForUpdatesThread(LPVOID param)
 		for (i=0; i<ARRAYSIZE(verpos); i++) {
 			vvuprintf("Trying %s\n", UrlParts.lpszUrlPath);
 			hRequest = HttpOpenRequestA(hConnection, "GET", UrlParts.lpszUrlPath, NULL, NULL, accept_types,
-				INTERNET_FLAG_HYPERLINK|INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTP|INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTPS|INTERNET_FLAG_NO_COOKIES|
-				INTERNET_FLAG_NO_UI|INTERNET_FLAG_NO_CACHE_WRITE, (DWORD_PTR)NULL);
+				INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTP|INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTPS|
+				INTERNET_FLAG_NO_COOKIES|INTERNET_FLAG_NO_UI|INTERNET_FLAG_NO_CACHE_WRITE|INTERNET_FLAG_HYPERLINK|
+				((UrlParts.nScheme == INTERNET_SCHEME_HTTPS)?INTERNET_FLAG_SECURE:0), (DWORD_PTR)NULL);
 			if ((hRequest == NULL) || (!HttpSendRequestA(hRequest, NULL, 0, NULL, 0)))
 				goto out;
 
@@ -534,7 +519,7 @@ static DWORD WINAPI CheckForUpdatesThread(LPVOID param)
 			dwSize = sizeof(dwStatus);
 			dwStatus = 404;
 			HttpQueryInfoA(hRequest, HTTP_QUERY_STATUS_CODE|HTTP_QUERY_FLAG_NUMBER, (LPVOID)&dwStatus, &dwSize, NULL);
-			if (dwStatus == 200) 
+			if (dwStatus == 200)
 				break;
 			InternetCloseHandle(hRequest);
 			hRequest = NULL;
@@ -568,7 +553,7 @@ static DWORD WINAPI CheckForUpdatesThread(LPVOID param)
 		// Might as well let the user know
 		if (!force_update_check) {
 			if ((local_time > server_time + 600) || (local_time < server_time - 600)) {
-				uprintf("IMPORTANT: Your local clock is more than 10 minutes in the %s. Unless you fix this, " APPLICATION_NAME " may not be able to check for updates...", 
+				uprintf("IMPORTANT: Your local clock is more than 10 minutes in the %s. Unless you fix this, " APPLICATION_NAME " may not be able to check for updates...",
 					(local_time > server_time + 600)?"future":"past");
 			}
 		}

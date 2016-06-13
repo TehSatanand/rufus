@@ -31,6 +31,7 @@ const char ISO_STANDARD_ID[] = {'C', 'D', '0', '0', '1'};
 #include <cdio/bytesex.h>
 #include <cdio/iso9660.h>
 #include <cdio/util.h>
+#include <cdio/portable.h>
 
 #include <time.h>
 #include <ctype.h>
@@ -118,7 +119,7 @@ localtime_r(const time_t *timer, struct tm *result)
 }
 #endif
 
-static const char _rcsid[] = "$Id: iso9660.c,v 1.41 2008/06/25 08:01:54 rocky Exp $";
+// static const char _rcsid[] = "$Id: iso9660.c,v 1.41 2008/06/25 08:01:54 rocky Exp $";
 
 /* Variables to hold debugger-helping enumerations */
 enum iso_enum1_s     iso_enums1;

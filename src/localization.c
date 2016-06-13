@@ -1,7 +1,7 @@
 /*
  * Rufus: The Reliable USB Formatting Utility
  * Localization functions, a.k.a. "Everybody is doing it wrong but me!"
- * Copyright © 2013-2015 Pete Batard <pete@akeo.ie>
+ * Copyright © 2013-2016 Pete Batard <pete@akeo.ie>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -35,7 +35,7 @@
 #include "localization.h"
 #include "localization_data.h"
 
-/* 
+/*
  * List of supported locale commands, with their parameter syntax:
  *   c control ID (no space, no quotes)
  *   s: quoted string
@@ -137,7 +137,7 @@ void add_message_command(loc_cmd* lcmd)
 		uprintf("localization: invalid MSG_ index\n");
 		return;
 	}
-	
+
 	safe_free(msg_table[lcmd->ctrl_id-MSG_000]);
 	msg_table[lcmd->ctrl_id-MSG_000] = lcmd->txt[1];
 	lcmd->txt[1] = NULL;	// String would be freed after this call otherwise
@@ -345,12 +345,12 @@ void apply_localization(int dlg_id, HWND hDlg)
 				break;
 			case LC_MOVE:
 				if (hCtrl != NULL) {
-					ResizeMoveCtrl(hDlg, hCtrl, lcmd->num[0], lcmd->num[1], 0, 0);
+					ResizeMoveCtrl(hDlg, hCtrl, lcmd->num[0], lcmd->num[1], 0, 0, fScale);
 				}
 				break;
 			case LC_SIZE:
 				if (hCtrl != NULL) {
-					ResizeMoveCtrl(hDlg, hCtrl, 0, 0, lcmd->num[0], lcmd->num[1]);
+					ResizeMoveCtrl(hDlg, hCtrl, 0, 0, lcmd->num[0], lcmd->num[1], fScale);
 				}
 				break;
 			}
@@ -375,15 +375,18 @@ void reset_localization(int dlg_id)
  * Uses a rolling list of buffers to allow concurrency
  * TODO: use dynamic realloc'd buffer in case LOC_MESSAGE_SIZE is not enough
  */
-char* lmprintf(int msg_id, ...)
+char* lmprintf(uint32_t msg_id, ...)
 {
 	static int buf_id = 0;
 	static char buf[LOC_MESSAGE_NB][LOC_MESSAGE_SIZE];
 	char *format = NULL;
 	va_list args;
+	BOOL needs_rtf_rtl_marks = (msg_id & MSG_RTF) && right_to_left_mode;
+
 	buf_id %= LOC_MESSAGE_NB;
 	buf[buf_id][0] = 0;
 
+	msg_id &= MSG_MASK;
 	if ((msg_id > MSG_000) && (msg_id < MSG_MAX)) {
 		format = msg_table[msg_id - MSG_000];
 	}
@@ -391,9 +394,13 @@ char* lmprintf(int msg_id, ...)
 	if (format == NULL) {
 		safe_sprintf(buf[buf_id], LOC_MESSAGE_SIZE-1, "MSG_%03d UNTRANSLATED", msg_id - MSG_000);
 	} else {
+		if (needs_rtf_rtl_marks)
+			safe_strcpy(buf[buf_id], LOC_MESSAGE_SIZE-1, "\\rtlch");
 		va_start(args, msg_id);
-		safe_vsnprintf(buf[buf_id], LOC_MESSAGE_SIZE-1, format, args);
+		safe_vsnprintf(&buf[buf_id][needs_rtf_rtl_marks?6:0], LOC_MESSAGE_SIZE-1, format, args);
 		va_end(args);
+		if (needs_rtf_rtl_marks)
+			safe_strcat(buf[buf_id], LOC_MESSAGE_SIZE-1, "\\ltrch");
 		buf[buf_id][LOC_MESSAGE_SIZE-1] = '\0';
 	}
 	return buf[buf_id++];
@@ -413,14 +420,54 @@ char* lmprintf(int msg_id, ...)
 #define MSG_HIGH_PRI 1
 char szMessage[2][2][MSG_LEN] = { {"", ""}, {"", ""} };
 char* szStatusMessage = szMessage[MSG_STATUS][MSG_HIGH_PRI];
-static BOOL bStatusTimerArmed = FALSE;
+static BOOL bStatusTimerArmed = FALSE, bOutputTimerArmed[2] = { FALSE, FALSE };
+static char *output_msg[2];
+static uint64_t last_msg_time[2] = { 0, 0 };
 
-static void __inline OutputMessage(BOOL info, char* msg)
+static void PrintInfoMessage(char* msg) {
+	SetWindowTextU(hInfo, msg);
+}
+static void PrintStatusMessage(char* msg) {
+	SendMessageLU(hStatus, SB_SETTEXTW, SBT_OWNERDRAW | SB_SECTION_LEFT, msg);
+}
+typedef void PRINT_FUNCTION(char*);
+PRINT_FUNCTION *PrintMessage[2] = { PrintInfoMessage, PrintStatusMessage };
+
+/*
+ * The following timer call is used, along with MAX_REFRESH, to prevent obnoxious flicker
+ * on the Info and Status fields due to messages being updated too quickly.
+ */
+static void CALLBACK OutputMessageTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 {
-	if (info)
-		SetWindowTextU(hInfo, msg);
-	else
-		SendMessageLU(GetDlgItem(hMainDialog, IDC_STATUS), SB_SETTEXTW, SBT_OWNERDRAW, msg);
+	int i = (idEvent == TID_OUTPUT_INFO)? 0 : 1;
+
+	KillTimer(hMainDialog, idEvent);
+	bOutputTimerArmed[i] = FALSE;
+	PrintMessage[i](output_msg[i]);
+	last_msg_time[i] = _GetTickCount64();
+}
+
+static void OutputMessage(BOOL info, char* msg)
+{
+	uint64_t delta;
+	int i = info ? 0 : 1;
+
+	if (bOutputTimerArmed[i]) {
+		// Already have a delayed message going - just change that message to latest
+		output_msg[i] = msg;
+	} else {
+		// Find if we need to arm a timer
+		delta = _GetTickCount64() - last_msg_time[i];
+		if (delta < (2 * MAX_REFRESH)) {
+			// Not enough time has elapsed since our last output => arm a timer
+			output_msg[i] = msg;
+			SetTimer(hMainDialog, TID_OUTPUT_INFO + i, (UINT)((2 * MAX_REFRESH) - delta), OutputMessageTimeout);
+			bOutputTimerArmed[i] = TRUE;
+		} else {
+			PrintMessage[i](msg);
+			last_msg_time[i] = _GetTickCount64();
+		}
+	}
 }
 
 static void CALLBACK PrintMessageTimeout(HWND hWnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
@@ -547,7 +594,7 @@ loc_cmd* get_locale_from_name(char* locale_name, BOOL fallback)
 	return lcmd;
 }
 
-/* 
+/*
  * This call is used to toggle the issuing of messages with the default locale
  * (usually en-US) instead of the current (usually non en) one.
  */
@@ -562,4 +609,67 @@ void toggle_default_locale(void)
 		msg_table = old_msg_table;
 		old_msg_table = NULL;
 	}
+}
+
+const char* get_name_from_id(int id)
+{
+	int i;
+	for (i=0; i<ARRAYSIZE(control_id); i++) {
+		if (control_id[i].id == id)
+			return control_id[i].name;
+	}
+	return "UNKNOWN ID";
+}
+
+/*
+ * This call is used to get a supported Windows Language identifier we
+ * should pass to MessageBoxEx to try to get the buttons displayed in
+ * the currently selected language. This relies on the relevant language
+ * pack having been installed.
+ */
+static BOOL found_lang;
+static BOOL CALLBACK EnumUILanguagesProc(LPTSTR lpUILanguageString, LONG_PTR lParam)
+{
+	wchar_t* wlang = (wchar_t*)lParam;
+	if (wcscmp(wlang, lpUILanguageString) == 0)
+		found_lang = TRUE;
+	return TRUE;
+}
+
+WORD get_language_id(loc_cmd* lcmd)
+{
+	int i;
+	wchar_t wlang[5];
+	LANGID lang_id = GetUserDefaultUILanguage();
+
+	// Log will be reset, so we need to use the buffered uprintf() to get our messages to the user
+	ubclear();
+	if (lcmd == NULL)
+		return MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT);
+
+	// Find if the selected language is the user default
+	for (i = 0; i<lcmd->unum_size; i++) {
+		if (lcmd->unum[i] == lang_id) {
+			ubpushf("Will use default UI locale 0x%04X", lang_id);
+			return MAKELANGID(lang_id, SUBLANG_DEFAULT);
+		}
+	}
+
+	// Selected language is not user default - find if a language pack is installed for it
+	found_lang = FALSE;
+	for (i = 0; (i<lcmd->unum_size); i++) {
+		// Always uppercase
+		_snwprintf(wlang, ARRAYSIZE(wlang), L"%04X", lcmd->unum[i]);
+		// This callback enumeration from Microsoft is retarded. Now we need a global
+		// boolean to tell us that we found what we were after.
+		EnumUILanguages(EnumUILanguagesProc, 0x4, (LONG_PTR)wlang);	// 0x04 = MUI_LANGUAGE_ID
+		if (found_lang) {
+			ubpushf("Detected installed Windows Language Pack for 0x%04X (%s)", lcmd->unum[i], lcmd->txt[1]);
+			return MAKELANGID(lcmd->unum[i], SUBLANG_DEFAULT);
+		}
+	}
+
+	ubpushf("NOTE: No Windows Language Pack is installed for %s on this system.\r\n"
+		"This means that some controls may still be displayed using the system locale.", lcmd->txt[1]);
+	return MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT);
 }

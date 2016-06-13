@@ -7,7 +7,7 @@
  *
  * Copyright 1995, 1996, 1997, 1998, 1999 by Theodore Ts'o
  * Copyright 1999 by David Beattie
- * Copyright 2011-2015 by Pete Batard
+ * Copyright 2011-2016 by Pete Batard
  *
  * This file is based on the minix file system programs fsck and mkfs
  * written and copyrighted by Linus Torvalds <Linus.Torvalds@cs.helsinki.fi>
@@ -42,15 +42,16 @@
 #include <stdint.h>
 
 #include "rufus.h"
-#include "badblocks.h"
-#include "file.h"
-#include "msapi_utf8.h"
 #include "resource.h"
+#include "msapi_utf8.h"
 #include "localization.h"
 
+#include "badblocks.h"
+#include "file.h"
+
 FILE* log_fd = NULL;
-static const char* abort_msg = "Too many bad blocks, aborting test\n";
-static const char* bb_prefix = "Bad Blocks: ";
+static const char abort_msg[] = "Too many bad blocks, aborting test\n";
+static const char bb_prefix[] = "Bad Blocks: ";
 
 /*
  *From e2fsprogs/lib/ext2fs/badblocks.c
@@ -255,19 +256,11 @@ static blk_t next_bad = 0;
 static bb_badblocks_iterate bb_iter = NULL;
 
 static __inline void *allocate_buffer(size_t size) {
-#ifdef __MINGW32__
-	return __mingw_aligned_malloc(size, BB_SYS_PAGE_SIZE);
-#else 
-	return _aligned_malloc(size, BB_SYS_PAGE_SIZE);
-#endif
+	return _mm_malloc(size, BB_SYS_PAGE_SIZE);
 }
 
 static __inline void free_buffer(void* p) {
-#ifdef __MINGW32__
-	__mingw_aligned_free(p);
-#else
-	_aligned_free(p);
-#endif
+	_mm_free(p);
 }
 
 /*
@@ -357,6 +350,7 @@ static void pattern_fill(unsigned char *buffer, unsigned int pattern,
 
 	if (pattern == (unsigned int) ~0) {
 		for (ptr = buffer; ptr < buffer + n; ptr++) {
+			// coverity[dont_call]
 			(*ptr) = rand() % (1 << (8 * sizeof(char)));
 		}
 		PrintInfo(3500, MSG_236);
@@ -457,6 +451,7 @@ static unsigned int test_rw(HANDLE hDrive, blk_t last_block, size_t block_size, 
 
 	for (pat_idx = 0; pat_idx < nb_passes; pat_idx++) {
 		if (cancel_ops) goto out;
+		// coverity[dont_call]
 		id_offset = rand() * (block_size-sizeof(blk_t)) / RAND_MAX;
 		pattern_fill(buffer, pattern[pat_idx], blocks_at_once * block_size);
 		uprintf("%sUsing offset %d for fake device check\n", bb_prefix, id_offset);

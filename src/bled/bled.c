@@ -1,5 +1,5 @@
 /*
- * Bled (Busybox Library for Easy Decompression)
+ * Bled (Base Library for Easy Decompression)
  *
  * Copyright © 2014-2015 Pete Batard <pete@akeo.ie>
  *
@@ -34,7 +34,7 @@ static long long int unpack_none(transformer_state_t *xstate)
 
 unpacker_t unpacker[BLED_COMPRESSION_MAX] = {
 	unpack_none,
-	unpack_none,
+	unpack_zip_stream,
 	unpack_Z_stream,
 	unpack_gz_stream,
 	unpack_lzma_stream,

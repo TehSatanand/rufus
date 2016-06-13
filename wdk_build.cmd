@@ -3,7 +3,7 @@
 if Test%BUILD_ALT_DIR%==Test goto usage
 
 ::# /M 2 for multiple cores
-set BUILD_CMD=build -bcwgZ -M2
+set BUILD_CMD=build -bcwgZ -M12
 set PWD=%~dp0
 
 ::# Set target platform type
@@ -66,6 +66,21 @@ copy .msvc\libinstaller_sources sources >NUL 2>&1
 @echo off
 if errorlevel 1 goto builderror
 copy obj%BUILD_ALT_DIR%\%ARCH_DIR%\libinstaller.lib . >NUL 2>&1
+
+if EXIST Makefile.hide ren Makefile.hide Makefile
+if EXIST sources del sources >NUL 2>&1
+
+::# SysLinux win Library
+cd ..\win
+if EXIST Makefile ren Makefile Makefile.hide
+
+copy .msvc\win_sources sources >NUL 2>&1
+
+@echo on
+%BUILD_CMD%
+@echo off
+if errorlevel 1 goto builderror
+copy obj%BUILD_ALT_DIR%\%ARCH_DIR%\win.lib . >NUL 2>&1
 
 if EXIST Makefile.hide ren Makefile.hide Makefile
 if EXIST sources del sources >NUL 2>&1
